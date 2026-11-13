@@ -3,19 +3,31 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 // Settings for the ball
-let startSpeed = 6;    // how fast the ball moves when a point starts
-let speedUp = 1;       // added to the ball's speed every time a paddle hits it
-let maxSpeed = 20;     // the ball never goes faster than this, otherwise it could jump right past a paddle
-let serveAngle = 75;   // the serve is aimed randomly within this many degrees
+let startSpeed = 6; // how fast the ball moves when a point starts
+let speedUp = 1; // added to the ball's speed every time a paddle hits it
+let maxSpeed = 20; // the ball never goes faster than this, otherwise it could jump right past a paddle
+let serveAngle = 75; // the serve is aimed randomly within this many degrees
 
 // Make each paddle's hitbox this many pixels taller on the top and bottom
 // so hits right on the edge still count
 let hitboxExtra = 5;
 
 // Settings for the paddles
-let paddleStartSpeed = 4;   // how fast a paddle moves as soon as you press the key
-let paddleSpeedUp = 1.05;   // every frame you hold the key, the speed is multiplied by this
-let paddleMaxSpeed = 14;    // paddles never go faster than this
+let paddleStartSpeed = 4; // how fast a paddle moves as soon as you press the key
+let paddleSpeedUp = 1.05; // every frame you hold the key, the speed is multiplied by this
+let paddleMaxSpeed = 14; // paddles never go faster than this
+
+// Sounds for game
+let scoreSound = new Audio("SFX/score.mp3");
+let hittingSound = new Audio("SFX/hitBall.mp3");
+let winningSound = new Audio("SFX/winSound.mp3");
+
+// Plays a sound from the start, even if it's still playing from last time.
+// Without rewinding, a second hit right after the first one would be silent.
+function playSound(sound) {
+  sound.currentTime = 0;
+  sound.play();
+}
 
 // The ball
 let ball = {
@@ -25,7 +37,7 @@ let ball = {
   height: 15,
   speedX: startSpeed,
   speedY: 4,
-  color: "yellow"
+  color: "yellow",
 };
 
 // Left paddle (Player 1)
@@ -36,7 +48,7 @@ let leftPaddle = {
   height: 100,
   speed: paddleStartSpeed,
   score: 0,
-  color: "white"
+  color: "white",
 };
 
 // Right paddle (Player 2)
@@ -47,7 +59,7 @@ let rightPaddle = {
   height: 100,
   speed: paddleStartSpeed,
   score: 0,
-  color: "white"
+  color: "white",
 };
 
 // true while that key is being held down
@@ -68,10 +80,12 @@ let winnerText = "";
 // Returns true if the ball is overlapping the paddle.
 // It compares the edges of the two rectangles, so it works for either paddle.
 function ballHitsPaddle(paddle) {
-  return ball.x < paddle.x + paddle.width &&
-         ball.x + ball.width > paddle.x &&
-         ball.y < paddle.y + paddle.height + hitboxExtra &&
-         ball.y + ball.height > paddle.y - hitboxExtra;
+  return (
+    ball.x < paddle.x + paddle.width &&
+    ball.x + ball.width > paddle.x &&
+    ball.y < paddle.y + paddle.height + hitboxExtra &&
+    ball.y + ball.height > paddle.y - hitboxExtra
+  );
 }
 
 // Moves a paddle up or down depending on which keys are held.
@@ -121,7 +135,7 @@ function resetBall(direction) {
   let angle = Math.random() * serveAngle - serveAngle / 2;
 
   // Convert to radians because Math.cos and Math.sin use radians
-  let radians = angle * Math.PI / 180;
+  let radians = (angle * Math.PI) / 180;
 
   // Use the angle to split the speed into left/right and up/down movement
   ball.speedX = Math.cos(radians) * startSpeed;
@@ -135,7 +149,9 @@ function resetBall(direction) {
 
 // Returns true if this player would win by scoring the next point
 function isMatchPoint(player, other) {
-  return player.score + 1 >= winScore && player.score + 1 - other.score >= winBy;
+  return (
+    player.score + 1 >= winScore && player.score + 1 - other.score >= winBy
+  );
 }
 
 // Returns true if this player has enough points and is ahead by enough to win
@@ -151,6 +167,7 @@ function pointScored(scorer, other, scorerSide) {
 
   // If that point won the game, stop and show who won
   if (hasWon(scorer, other)) {
+    playSound(winningSound);
     gameOver = true;
     playing = false;
     if (scorerSide == "left") {
@@ -160,6 +177,9 @@ function pointScored(scorer, other, scorerSide) {
     }
     return;
   }
+
+  // Not a winning point, so just play the normal score sound
+  playSound(scoreSound);
 
   // Usually the ball is served toward the player who just lost the point
   let direction;
@@ -205,7 +225,8 @@ function update() {
 
   // Ball hits the left paddle while moving left: send it back right
   if (ballHitsPaddle(leftPaddle) && ball.speedX < 0) {
-    ball.speedX = -ball.speedX + speedUp;   // reverse it and add a little speed
+    ball.speedX = -ball.speedX + speedUp; // reverse it and add a little speed
+    playSound(hittingSound);
     if (ball.speedX > maxSpeed) {
       ball.speedX = maxSpeed;
     }
@@ -213,7 +234,8 @@ function update() {
 
   // Ball hits the right paddle while moving right: send it back left
   if (ballHitsPaddle(rightPaddle) && ball.speedX > 0) {
-    ball.speedX = -ball.speedX - speedUp;   // reverse it and add a little speed
+    ball.speedX = -ball.speedX - speedUp; // reverse it and add a little speed
+    playSound(hittingSound);
     if (ball.speedX < -maxSpeed) {
       ball.speedX = -maxSpeed;
     }
@@ -250,10 +272,14 @@ function draw() {
   ctx.font = "50px Arial";
   ctx.textAlign = "center";
   ctx.fillText(leftPaddle.score, canvas.width / 4, 70);
-  ctx.fillText(rightPaddle.score, canvas.width * 3 / 4, 70);
+  ctx.fillText(rightPaddle.score, (canvas.width * 3) / 4, 70);
 
   // Show "MATCH POINT" when either player is one point from winning
-  if (!gameOver && (isMatchPoint(leftPaddle, rightPaddle) || isMatchPoint(rightPaddle, leftPaddle))) {
+  if (
+    !gameOver &&
+    (isMatchPoint(leftPaddle, rightPaddle) ||
+      isMatchPoint(rightPaddle, leftPaddle))
+  ) {
     ctx.font = "30px Arial";
     ctx.fillText("MATCH POINT", canvas.width / 2, 120);
     ctx.font = "50px Arial";
@@ -262,7 +288,11 @@ function draw() {
   // Show the winner, or the start message when the game is paused
   if (gameOver) {
     ctx.fillText(winnerText, canvas.width / 2, canvas.height / 2 - 30);
-    ctx.fillText("Press Space to play again", canvas.width / 2, canvas.height / 2 + 40);
+    ctx.fillText(
+      "Press Space to play again",
+      canvas.width / 2,
+      canvas.height / 2 + 40,
+    );
   } else if (!playing) {
     ctx.fillText("Press Space", canvas.width / 2, canvas.height / 2);
   }
