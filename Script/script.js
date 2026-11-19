@@ -50,6 +50,7 @@ let leftPaddle = {
   speed: paddleStartSpeed,
   score: 0,
   color: "white",
+  // image: getElementById("paddleLeft", width="50", height="60"),
 };
 
 // Right paddle (Player 2)
