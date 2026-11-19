@@ -21,6 +21,7 @@ let paddleMaxSpeed = 14; // paddles never go faster than this
 let scoreSound = new Audio("SFX/score.mp3");
 let hittingSound = new Audio("SFX/hitBall.mp3");
 let winningSound = new Audio("SFX/winSound.mp3");
+let battleMusic = new Audio("SFX/battleMusic.mp3");
 
 // Plays a sound from the start, even if it's still playing from last time.
 // Without rewinding, a second hit right after the first one would be silent.
@@ -42,10 +43,10 @@ let ball = {
 
 // Left paddle (Player 1)
 let leftPaddle = {
-  x: 30,
-  y: 250,
-  width: 15,
-  height: 100,
+  x: 250,
+  y: 575,
+  width: 100,
+  height: 15,
   speed: paddleStartSpeed,
   score: 0,
   color: "white",
@@ -53,20 +54,20 @@ let leftPaddle = {
 
 // Right paddle (Player 2)
 let rightPaddle = {
-  x: canvas.width - 45,
-  y: 250,
-  width: 15,
-  height: 100,
+  x: canvas.width - 275,
+  y: 575,
+  width: 100,
+  height: 15,
   speed: paddleStartSpeed,
   score: 0,
   color: "white",
 };
 
 // true while that key is being held down
-let wPressed = false;
-let sPressed = false;
-let upPressed = false;
-let downPressed = false;
+let aPressed = false;
+let dPressed = false;
+let leftPressed = false;
+let rightPressed = false;
 
 // false when the game is paused or hasn't started yet
 let playing = false;
@@ -83,30 +84,30 @@ function ballHitsPaddle(paddle) {
   return (
     ball.x < paddle.x + paddle.width &&
     ball.x + ball.width > paddle.x &&
-    ball.y < paddle.y + paddle.height + hitboxExtra &&
-    ball.y + ball.height > paddle.y - hitboxExtra
+    ball.y < paddle.x + paddle.height + hitboxExtra &&
+    ball.y + ball.height > paddle.x - hitboxExtra
   );
 }
 
 // Moves a paddle up or down depending on which keys are held.
 // The longer you hold a key, the faster the paddle moves.
-function movePaddle(paddle, upHeld, downHeld) {
-  if (upHeld && paddle.y > 0) {
-    paddle.y -= paddle.speed;
+function movePaddle(paddle, leftHeld, rightHeld) {
+  if (leftHeld && paddle.x > 0) {
+    paddle.x -= paddle.speed;
   }
-  if (downHeld && paddle.y < canvas.height - paddle.height) {
-    paddle.y += paddle.speed;
+  if (rightHeld && paddle.x < canvas.width - paddle.width) {
+    paddle.x += paddle.speed;
   }
 
   // If the paddle went past the top or bottom, put it back on the edge
-  if (paddle.y < 0) {
-    paddle.y = 0;
+  if (paddle.x < 0) {
+    paddle.x = 0;
   }
-  if (paddle.y > canvas.height - paddle.height) {
-    paddle.y = canvas.height - paddle.height;
+  if (paddle.x > canvas.width - paddle.width) {
+    paddle.x = canvas.width - paddle.width;
   }
 
-  if (upHeld || downHeld) {
+  if (leftHeld || rightHeld) {
     // A key is held, so speed the paddle up a little (up to the limit)
     paddle.speed *= paddleSpeedUp;
     if (paddle.speed > paddleMaxSpeed) {
@@ -211,8 +212,8 @@ function newGame() {
 // Moves everything one step and checks for bounces and points
 function update() {
   // Move the paddles
-  movePaddle(leftPaddle, wPressed, sPressed);
-  movePaddle(rightPaddle, upPressed, downPressed);
+  movePaddle(leftPaddle, aPressed, dPressed);
+  movePaddle(rightPaddle, leftPressed, rightPressed);
 
   // Move the ball
   ball.x += ball.speedX;
@@ -252,9 +253,11 @@ function update() {
   }
 }
 
+ 
 // Draws the whole screen for the current frame
 function draw() {
   // Fill the screen with black to erase the last frame
+  // <img src = "Style/pong_Background.jpg"></img>
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -296,6 +299,7 @@ function draw() {
   } else if (!playing) {
     ctx.fillText("Press Space", canvas.width / 2, canvas.height / 2);
   }
+  
 }
 
 // Runs at 60 fps
@@ -311,27 +315,28 @@ setInterval(gameLoop, 1000 / 60);
 // When a key is pressed, remember that it's held down.
 // Space starts or pauses the game, and starts a new one after someone wins.
 document.addEventListener("keydown", function (event) {
-  if (event.key == "w") wPressed = true;
-  if (event.key == "s") sPressed = true;
-  if (event.key == "ArrowUp") upPressed = true;
-  if (event.key == "ArrowDown") downPressed = true;
+  if (event.key == "A") aPressed = true;
+  if (event.key == "D") dPressed = true;
+  if (event.key == "ArrowLeft") leftPressed = true;
+  if (event.key == "ArrowRight") rightPressed = true;
   if (event.key == " ") {
     if (gameOver) {
       newGame();
     }
     playing = !playing;
+    playSound(battleMusic);
   }
 
   // Stop the arrow keys and space from scrolling the page
-  if (event.key == "ArrowUp" || event.key == "ArrowDown" || event.key == " ") {
+  if (event.key == "ArrowLeft" || event.key == "ArrowRight" || event.key == " ") {
     event.preventDefault();
   }
 });
 
 // When a key is let go, mark it as not held anymore
 document.addEventListener("keyup", function (event) {
-  if (event.key == "w") wPressed = false;
-  if (event.key == "s") sPressed = false;
-  if (event.key == "ArrowUp") upPressed = false;
-  if (event.key == "ArrowDown") downPressed = false;
+  if (event.key == "A") aPressed = false;
+  if (event.key == "D") dPressed = false;
+  if (event.key == "ArrowLeft") leftPressed = false;
+  if (event.key == "ArrowRight") rightPressed = false;
 });
