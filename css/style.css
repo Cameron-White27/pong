@@ -1,5 +1,4 @@
 body {
-  /* background-image: url(warriorsClash_Background.jpg); */
   background-color: #222;
   color: white;
   font-family: Arial, sans-serif;
@@ -11,7 +10,7 @@ h1 {
   margin: 10px;
 }
 
-/* Stretch the canvas to 80% of the window width; height scales with it */
+/* Scale the canvas to 80% of the window width; the height keeps its ratio */
 canvas {
   width: 80%;
   border: 4px solid white;

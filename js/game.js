@@ -1,128 +1,151 @@
-// Grab the canvas from the page and the 2D context we use to draw on it
+// =============================================================
+// Canvas
+// =============================================================
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-// Settings for the ball
-let startSpeed = 6; // how fast the ball moves when a point starts
-let speedUp = 1; // added to the ball's speed every time a paddle hits it
-let maxSpeed = 20; // the ball never goes faster than this off a normal hit
-let serveAngle = 30; // the serve leans sideways by a random amount up to this many degrees
-let bounceAngle = 60; // hitting the ball with the very end of a paddle sends it off at this angle
+// =============================================================
+// Settings
+// =============================================================
 
-// Settings for the paddles
-let paddleStartSpeed = 4; // how fast a paddle moves as soon as you press the key
-let paddleSpeedUp = 1.05; // every frame you hold the key, the speed is multiplied by this
-let paddleMaxSpeed = 14; // paddles never go faster than this
+// Ball (drawn as an arrow)
+const startSpeed = 6; // speed at the start of each point
+const speedUp = 1; // speed added by each normal hit
+const maxSpeed = 20; // speed cap for normal hits
+const serveAngle = 30; // largest sideways lean of a serve, in degrees
+const bounceAngle = 60; // return angle off the very end of a paddle, in degrees
 
-// Paddle size. The shields are drawn on their sides and stretched to fill this box,
-// and the hitbox is exactly this box, so what you see is what you hit.
-let paddleWidth = 140;
-let paddleHeight = 70;
-let paddleY = canvas.height - paddleHeight - 10;
+// Paddles (drawn as shields)
+const paddleStartSpeed = 4; // speed on the first frame a key is held
+const paddleSpeedUp = 1.05; // speed multiplier for each frame the key stays held
+const paddleMaxSpeed = 14;
+const paddleWidth = 140; // the shield image is stretched to fill this box,
+const paddleHeight = 70; // and the box is also the hitbox
+const paddleY = canvas.height - paddleHeight - 10;
 
-// Warrior buff: a player who is behind by this many points or more gets the buff
-let buffBehindBy = 2;
-let buffPaddleWidth = 200; // the buffed shield is this wide
-let buffSpeedUp = 3; // buffed hits add this much speed instead of speedUp
-// Buffed hits are allowed past maxSpeed, up to this.
-// When the other player hits it back, their normal hit drops it back to maxSpeed.
-let buffMaxSpeed = 30;
+// Warrior buff: given to a player who is behind by buffBehindBy points or more
+const buffBehindBy = 2;
+const buffPaddleWidth = 200;
+const buffSpeedUp = 3; // used instead of speedUp on buffed hits
+const buffMaxSpeed = 30; // used instead of maxSpeed on buffed hits; the next
+// normal hit caps the speed back down to maxSpeed
 
-// Sounds for game
-let scoreSound = new Audio("SFX/score.mp3");
-let winningSound = new Audio("SFX/winSound.mp3");
+// Scoring: first to winScore, but a player must lead by winBy to win
+const winScore = 11;
+const winBy = 2;
 
-// Background music. loop = true makes it start over by itself when it ends.
-let battleMusic = new Audio("SFX/battleMusic.mp3");
-battleMusic.loop = true;
+// =============================================================
+// Images and sounds
+// =============================================================
 
-// Pictures for the ball and paddles
-let ballImage = new Image();
-ballImage.src = "WarriorsClashTheme/warriorsClash_Ball.png";
-let leftPaddleImage = new Image();
-leftPaddleImage.src = "WarriorsClashTheme/warriorsClash_Paddle1.png";
-let rightPaddleImage = new Image();
-rightPaddleImage.src = "WarriorsClashTheme/warriorsClash_Paddle2.png";
+function loadImage(src) {
+  const image = new Image();
+  image.src = src;
+  return image;
+}
 
-// The arrow picture points up and to the right, which is -45 degrees on the canvas
-// (0 is pointing right, and negative angles go up). We need this to turn it the right way.
-let arrowImageAngle = -Math.PI / 4;
+// True once an image has finished loading without errors
+function isLoaded(image) {
+  return image.complete && image.naturalWidth > 0;
+}
 
-// Plays a sound from the start, even if it's still playing from last time.
-// Without rewinding, a second hit right after the first one would be silent.
+const images = {
+  background: loadImage("assets/images/background.jpg"),
+  ball: loadImage("assets/images/ball.png"),
+  leftShield: loadImage("assets/images/leftShield.png"),
+  rightShield: loadImage("assets/images/rightShield.png"),
+};
+
+const sounds = {
+  deflect: new Audio("assets/sounds/deflect.mp3"),
+  score: new Audio("assets/sounds/score.mp3"),
+  win: new Audio("assets/sounds/win.mp3"),
+  music: new Audio("assets/sounds/battleMusic.mp3"),
+};
+sounds.music.loop = true;
+
+// The arrow image points up and to the right, which is -45 degrees on the
+// canvas. drawBall subtracts this so the arrow faces the way it is moving.
+const arrowImageAngle = -Math.PI / 4;
+
+// Rewinds before playing so a sound that is still playing restarts
+// instead of being skipped
 function playSound(sound) {
   sound.currentTime = 0;
   sound.play();
 }
 
-// The ball
-let ball = {
-  x: canvas.width / 2,
-  y: canvas.height / 2,
+// =============================================================
+// Game objects and state
+// =============================================================
+
+const ball = {
+  x: 0, // position and speed are set by resetBall
+  y: 0,
   width: 30,
   height: 30,
   speedX: 0,
-  speedY: startSpeed,
-  color: "yellow", // only used if the picture hasn't loaded
-  image: ballImage,
+  speedY: 0,
+  color: "yellow", // fallback if the image hasn't loaded
+  image: images.ball,
 };
 
-// Left paddle (Player 1), starts in the middle of the left half
-let leftPaddle = {
-  x: canvas.width / 4 - paddleWidth / 2,
-  y: paddleY,
-  width: paddleWidth,
-  height: paddleHeight,
-  sideStart: 0, // this paddle's half of the screen starts here...
-  sideEnd: canvas.width / 2, // ...and ends at the middle line
-  speed: paddleStartSpeed,
-  score: 0,
-  buffed: false,
-  color: "white",
-  image: leftPaddleImage,
-  // The part of the picture that actually has the shield in it (no empty border),
-  // so the drawn shield fills the hitbox edge to edge
+// Builds a paddle centered in its half of the screen.
+// settings holds everything that differs between the two players.
+function createPaddle(settings) {
+  const halfWidth = settings.sideEnd - settings.sideStart;
+  return {
+    ...settings,
+    x: settings.sideStart + (halfWidth - paddleWidth) / 2,
+    y: paddleY,
+    width: paddleWidth,
+    height: paddleHeight,
+    speed: paddleStartSpeed,
+    score: 0,
+    buffed: false,
+    color: "white", // fallback if the image hasn't loaded
+  };
+}
+
+const leftPaddle = createPaddle({
+  name: "Player 1",
+  side: "left",
+  sideStart: 0, // the paddle is kept between sideStart and sideEnd
+  sideEnd: canvas.width / 2,
+  leftKey: "a",
+  rightKey: "d",
+  image: images.leftShield,
+  // The part of the image that contains the shield, without the empty border
   crop: { x: 6, y: 7, width: 193, height: 192 },
-  turn: Math.PI / 2, // a quarter turn clockwise, so the top of the shield faces the middle
-};
+  turn: Math.PI / 2, // quarter turn clockwise so the shield lies on its side
+});
 
-// Right paddle (Player 2), starts in the middle of the right half
-let rightPaddle = {
-  x: (canvas.width * 3) / 4 - paddleWidth / 2,
-  y: paddleY,
-  width: paddleWidth,
-  height: paddleHeight,
-  sideStart: canvas.width / 2, // starts at the middle line...
-  sideEnd: canvas.width, // ...and ends at the right wall
-  speed: paddleStartSpeed,
-  score: 0,
-  buffed: false,
-  color: "white",
-  image: rightPaddleImage,
+const rightPaddle = createPaddle({
+  name: "Player 2",
+  side: "right",
+  sideStart: canvas.width / 2,
+  sideEnd: canvas.width,
+  leftKey: "arrowleft",
+  rightKey: "arrowright",
+  image: images.rightShield,
   crop: { x: 11, y: 9, width: 173, height: 177 },
-  turn: -Math.PI / 2, // a quarter turn the other way, so it mirrors the left shield
-};
+  turn: -Math.PI / 2, // quarter turn the other way, mirroring the left shield
+});
 
-// All the sparks currently flying around
+const paddles = [leftPaddle, rightPaddle];
+
 let sparks = [];
-
-// true while that key is being held down
-let aPressed = false;
-let dPressed = false;
-let leftPressed = false;
-let rightPressed = false;
-
-// false when the game is paused or hasn't started yet
-let playing = false;
-
-// First to 11 wins, but you have to win by 2
-let winScore = 11;
-let winBy = 2;
+const heldKeys = new Set(); // lowercase names of the keys currently held down
+let playing = false; // false while paused and before the first serve
 let gameOver = false;
 let winnerText = "";
 
-// Returns true if the ball is overlapping the paddle.
-// It compares the edges of the two rectangles, so it works for either paddle.
+// =============================================================
+// Paddles
+// =============================================================
+
+// Axis-aligned rectangle overlap test between the ball and a paddle
 function ballHitsPaddle(paddle) {
   return (
     ball.x < paddle.x + paddle.width &&
@@ -132,7 +155,7 @@ function ballHitsPaddle(paddle) {
   );
 }
 
-// Keeps a paddle on its own half: it can't go past the wall or the middle line
+// Keeps a paddle inside its own half, between the wall and the center line
 function keepOnSide(paddle) {
   if (paddle.x < paddle.sideStart) {
     paddle.x = paddle.sideStart;
@@ -142,118 +165,106 @@ function keepOnSide(paddle) {
   }
 }
 
-// Moves a paddle left or right depending on which keys are held.
-// The longer you hold a key, the faster the paddle moves.
-function movePaddle(paddle, leftHeld, rightHeld) {
+// Moves a paddle based on its player's keys. Holding a key accelerates the
+// paddle up to paddleMaxSpeed; releasing both keys resets its speed.
+function movePaddle(paddle) {
+  const leftHeld = heldKeys.has(paddle.leftKey);
+  const rightHeld = heldKeys.has(paddle.rightKey);
+
   if (leftHeld) {
     paddle.x -= paddle.speed;
   }
   if (rightHeld) {
     paddle.x += paddle.speed;
   }
-
   keepOnSide(paddle);
 
   if (leftHeld || rightHeld) {
-    // A key is held, so speed the paddle up a little (up to the limit)
-    paddle.speed *= paddleSpeedUp;
-    if (paddle.speed > paddleMaxSpeed) {
-      paddle.speed = paddleMaxSpeed;
-    }
+    paddle.speed = Math.min(paddle.speed * paddleSpeedUp, paddleMaxSpeed);
   } else {
-    // No key is held, so reset the speed for next time
     paddle.speed = paddleStartSpeed;
   }
 }
 
-// Changes a paddle's width but keeps it centered where it was
+// Changes a paddle's width while keeping its center in place
 function setPaddleWidth(paddle, newWidth) {
-  let center = paddle.x + paddle.width / 2;
+  const center = paddle.x + paddle.width / 2;
   paddle.width = newWidth;
   paddle.x = center - newWidth / 2;
   keepOnSide(paddle);
 }
 
-// Gives the warrior buff to whoever is far enough behind, and takes it away
-// from anyone who has caught up
+// Gives the buff to a player who is far enough behind and removes it
+// from a player who has caught up
 function updateBuffs() {
   leftPaddle.buffed = rightPaddle.score - leftPaddle.score >= buffBehindBy;
   rightPaddle.buffed = leftPaddle.score - rightPaddle.score >= buffBehindBy;
 
-  for (let paddle of [leftPaddle, rightPaddle]) {
-    if (paddle.buffed) {
-      setPaddleWidth(paddle, buffPaddleWidth);
-    } else {
-      setPaddleWidth(paddle, paddleWidth);
-    }
+  for (const paddle of paddles) {
+    setPaddleWidth(paddle, paddle.buffed ? buffPaddleWidth : paddleWidth);
   }
 }
 
-// Draws a filled rectangle for anything with x, y, width, height and color
-function drawObject(obj) {
-  ctx.fillStyle = obj.color;
-  ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+// =============================================================
+// Ball
+// =============================================================
+
+// Places the ball near the top center and serves it downward, leaning
+// toward the given side ("left" or "right")
+function resetBall(direction) {
+  ball.x = canvas.width / 2 - ball.width / 2;
+  ball.y = canvas.height / 3;
+
+  // Random angle from straight down. The 10 degree minimum stops a serve
+  // from dropping straight onto the center line.
+  const angle = 10 + Math.random() * (serveAngle - 10);
+  const radians = (angle * Math.PI) / 180;
+  const sign = direction === "left" ? -1 : 1;
+
+  ball.speedX = sign * Math.sin(radians) * startSpeed;
+  ball.speedY = Math.cos(radians) * startSpeed;
 }
 
-// Draws a shield lying on its side, stretched to fill the paddle's box
-function drawPaddle(paddle) {
-  ctx.save();
+// Sends the ball back up off a paddle. The hit position sets the angle:
+// the center returns it straight up, the ends angle it up to bounceAngle.
+function bounceOffPaddle(paddle) {
+  const ballCenter = ball.x + ball.width / 2;
+  const paddleCenter = paddle.x + paddle.width / 2;
 
-  // A buffed shield glows red
-  if (paddle.buffed) {
-    ctx.shadowColor = "red";
-    ctx.shadowBlur = 30;
-  }
+  // -1 at the paddle's left end, 0 at its center, 1 at its right end
+  let hitSpot = (ballCenter - paddleCenter) / (paddle.width / 2);
+  hitSpot = Math.max(-1, Math.min(1, hitSpot));
+  const radians = (hitSpot * bounceAngle * Math.PI) / 180;
 
-  if (paddle.image.complete && paddle.image.naturalWidth > 0) {
-    // Move to the middle of the paddle and turn the canvas a quarter turn.
-    // After turning, the picture's width runs up and down and its height runs
-    // left to right, so we draw it paddle.height wide and paddle.width tall.
-    ctx.translate(paddle.x + paddle.width / 2, paddle.y + paddle.height / 2);
-    ctx.rotate(paddle.turn);
-    let c = paddle.crop;
-    ctx.drawImage(
-      paddle.image,
-      c.x, c.y, c.width, c.height, // the part of the picture to use
-      -paddle.height / 2, -paddle.width / 2, paddle.height, paddle.width, // where to put it
-    );
-  } else {
-    drawObject(paddle); // picture not loaded yet, draw a plain rectangle
-  }
+  // Buffed hits add more speed and have a higher cap
+  const gain = paddle.buffed ? buffSpeedUp : speedUp;
+  const limit = paddle.buffed ? buffMaxSpeed : maxSpeed;
+  const speed = Math.min(Math.hypot(ball.speedX, ball.speedY) + gain, limit);
 
-  ctx.restore();
+  ball.speedX = Math.sin(radians) * speed;
+  ball.speedY = -Math.cos(radians) * speed; // negative is upward
+
+  // Move the ball above the paddle so it can't collide again next frame
+  ball.y = paddle.y - ball.height;
+
+  makeSparks(ballCenter, paddle.y, paddle.buffed);
+  playSound(sounds.deflect);
 }
 
-// Draws the arrow turned so its tip points the way it's flying.
-function drawBall() {
-  if (!(ball.image.complete && ball.image.naturalWidth > 0)) {
-    drawObject(ball); // picture not loaded yet, draw a plain square
-    return;
-  }
+// =============================================================
+// Sparks
+// =============================================================
 
-  // Math.atan2 turns the ball's speed into the angle it's moving at
-  let flyingAngle = Math.atan2(ball.speedY, ball.speedX);
-
-  // Move the canvas to the middle of the ball, spin it, draw the arrow
-  // centered there, then undo the move and spin so nothing else is affected
-  ctx.save();
-  ctx.translate(ball.x + ball.width / 2, ball.y + ball.height / 2);
-  ctx.rotate(flyingAngle - arrowImageAngle);
-  ctx.drawImage(ball.image, -ball.width / 2, -ball.height / 2, ball.width, ball.height);
-  ctx.restore();
-}
-
-// Makes a burst of sparks at (x, y), like metal hitting metal.
-// Buffed hits make a bigger burst.
+// Adds a burst of sparks at (x, y). big is used for buffed hits.
 function makeSparks(x, y, big) {
-  let count = big ? 45 : 25;
-  let colors = ["#ffffff", "#fff3b0", "#ffd34d", "#ff9a1f"];
+  const count = big ? 45 : 25;
+  const colors = ["#ffffff", "#fff3b0", "#ffd34d", "#ff9a1f"];
 
   for (let i = 0; i < count; i++) {
-    // Mostly upward, spread out up to about 110 degrees either side
-    let angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.2;
-    let speed = 2 + Math.random() * (big ? 9 : 6);
-    let life = 15 + Math.random() * 25; // how many frames it lasts
+    // Mostly upward, spread up to about 110 degrees to either side
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.2;
+    const speed = 2 + Math.random() * (big ? 9 : 6);
+    const life = 15 + Math.random() * 25; // in frames
 
     sparks.push({
       x: x,
@@ -268,277 +279,305 @@ function makeSparks(x, y, big) {
   }
 }
 
-// Moves every spark one step and removes the ones that have burned out
+// Moves each spark one frame, applying gravity and drag, and removes
+// sparks whose life has run out
 function updateSparks() {
-  for (let spark of sparks) {
+  for (const spark of sparks) {
     spark.x += spark.speedX;
     spark.y += spark.speedY;
-    spark.speedY += 0.35; // gravity pulls them back down
-    spark.speedX *= 0.96; // air slows them a little
+    spark.speedY += 0.35; // gravity
+    spark.speedX *= 0.96; // drag
     spark.life--;
   }
   sparks = sparks.filter((spark) => spark.life > 0);
 }
 
-// Draws each spark as a short glowing streak that fades as it dies
+// Draws each spark as a streak that fades out over its life
 function drawSparks() {
   ctx.save();
-  ctx.globalCompositeOperation = "lighter"; // overlapping sparks add up and look brighter
+  ctx.globalCompositeOperation = "lighter"; // overlapping sparks add up to brighter colors
   ctx.lineCap = "round";
-  for (let spark of sparks) {
+  for (const spark of sparks) {
     ctx.globalAlpha = spark.life / spark.maxLife;
     ctx.strokeStyle = spark.color;
     ctx.lineWidth = spark.size;
     ctx.beginPath();
     ctx.moveTo(spark.x, spark.y);
-    // The tail trails behind the way it came, so faster sparks make longer streaks
+    // The tail points back along the spark's path, so faster sparks leave longer streaks
     ctx.lineTo(spark.x - spark.speedX * 2, spark.y - spark.speedY * 2);
     ctx.stroke();
   }
   ctx.restore();
 }
 
-// Puts the ball back in the middle and serves it downward.
-// direction is "left" or "right", the player whose half the ball drifts toward.
-function resetBall(direction) {
-  ball.x = canvas.width / 2 - ball.width / 2;
-  ball.y = canvas.height / 3;
+// =============================================================
+// Scoring
+// =============================================================
 
-  // Pick a random angle between 10 degrees and serveAngle.
-  // 0 would be straight down; bigger numbers lean further to the side.
-  let angle = 10 + Math.random() * (serveAngle - 10);
-
-  // Convert to radians because Math.cos and Math.sin use radians
-  let radians = (angle * Math.PI) / 180;
-
-  // Use the angle to split the speed into sideways and downward movement
-  ball.speedX = Math.sin(radians) * startSpeed;
-  ball.speedY = Math.cos(radians) * startSpeed;
-
-  // That math always leans the ball right, so flip it if it should go left
-  if (direction == "left") {
-    ball.speedX = -ball.speedX;
-  }
-}
-
-// Sends the ball back up off a paddle.
-// Where it lands on the paddle decides the angle: the middle sends it
-// straight up, the ends send it off to the side. That's how you aim.
-function bounceOffPaddle(paddle) {
-  let ballCenter = ball.x + ball.width / 2;
-  let paddleCenter = paddle.x + paddle.width / 2;
-
-  // -1 at the far left end of the paddle, 0 in the middle, 1 at the far right end
-  let hitSpot = (ballCenter - paddleCenter) / (paddle.width / 2);
-  if (hitSpot < -1) hitSpot = -1;
-  if (hitSpot > 1) hitSpot = 1;
-
-  let radians = (hitSpot * bounceAngle * Math.PI) / 180;
-
-  // Work out the ball's current speed and add some.
-  // A buffed hit adds more and is allowed past maxSpeed.
-  // A normal hit is capped at maxSpeed, so if a buffed hit sent the ball
-  // faster than that, hitting it back brings it down to maxSpeed again.
-  let speed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
-  let limit;
-  if (paddle.buffed) {
-    speed += buffSpeedUp;
-    limit = buffMaxSpeed;
-  } else {
-    speed += speedUp;
-    limit = maxSpeed;
-  }
-  if (speed > limit) {
-    speed = limit;
-  }
-
-  ball.speedX = Math.sin(radians) * speed;
-  ball.speedY = -Math.cos(radians) * speed; // negative means up
-
-  // Put the ball on top of the paddle so it can't get stuck inside it
-  ball.y = paddle.y - ball.height;
-
-  // Sparks fly from where the arrow struck the shield
-  makeSparks(ballCenter, paddle.y, paddle.buffed);
-
-  // TODO: play the new paddle hit sound here
-}
-
-// Returns true if this player would win by scoring the next point
+// True if scoring the next point would win the game for player
 function isMatchPoint(player, other) {
-  return (
-    player.score + 1 >= winScore && player.score + 1 - other.score >= winBy
-  );
+  return player.score + 1 >= winScore && player.score + 1 - other.score >= winBy;
 }
 
-// Returns true if this player has enough points and is ahead by enough to win
 function hasWon(player, other) {
   return player.score >= winScore && player.score - other.score >= winBy;
 }
 
-// Runs whenever someone scores.
-// scorer is the paddle that got the point, other is the one that didn't.
-// scorerSide is "left" or "right".
-function pointScored(scorer, other, scorerSide) {
+// Awards a point to scorer, then either ends the game or serves again
+function pointScored(scorer, other) {
   scorer.score++;
   updateBuffs();
 
-  // If that point won the game, stop and show who won
   if (hasWon(scorer, other)) {
-    battleMusic.pause();
-    playSound(winningSound);
+    sounds.music.pause();
+    playSound(sounds.win);
     gameOver = true;
     playing = false;
-    if (scorerSide == "left") {
-      winnerText = "Player 1 wins!";
-    } else {
-      winnerText = "Player 2 wins!";
-    }
+    winnerText = scorer.name + " wins!";
     return;
   }
 
-  // Not a winning point, so just play the normal score sound
-  playSound(scoreSound);
+  playSound(sounds.score);
 
-  // Usually the ball is served toward the player who just lost the point
-  let direction;
-  if (scorerSide == "left") {
-    direction = "right";
-  } else {
-    direction = "left";
-  }
-
-  // On match point the ball is served toward the player who is ahead instead
+  // Serve toward the player who lost the point, except on match point,
+  // when the serve goes toward the player who is one point from winning
+  let serveTo = other;
   if (isMatchPoint(leftPaddle, rightPaddle)) {
-    direction = "left";
+    serveTo = leftPaddle;
   }
   if (isMatchPoint(rightPaddle, leftPaddle)) {
-    direction = "right";
+    serveTo = rightPaddle;
   }
-
-  resetBall(direction);
+  resetBall(serveTo.side);
 }
 
-// Resets the scores and serves to start a new game
 function newGame() {
   leftPaddle.score = 0;
   rightPaddle.score = 0;
   updateBuffs();
   sparks = [];
   gameOver = false;
-  battleMusic.currentTime = 0; // start the music over for the new game
+  sounds.music.currentTime = 0;
   resetBall("right");
 }
 
-// Moves everything one step and checks for bounces and points
-function update() {
-  // Move the paddles
-  movePaddle(leftPaddle, aPressed, dPressed);
-  movePaddle(rightPaddle, leftPressed, rightPressed);
+// Space: starts a new game after a win, otherwise pauses or unpauses.
+// The music pauses and resumes along with the game.
+function togglePlaying() {
+  if (gameOver) {
+    newGame();
+  }
+  playing = !playing;
 
-  // Move the ball
+  if (playing) {
+    sounds.music.play();
+  } else {
+    sounds.music.pause();
+  }
+}
+
+// =============================================================
+// Update
+// =============================================================
+
+// Advances the game by one frame
+function update() {
+  for (const paddle of paddles) {
+    movePaddle(paddle);
+  }
+
   ball.x += ball.speedX;
   ball.y += ball.speedY;
 
-  // The top and both sides are walls. Put the ball back on the wall
-  // and point it away, so it can never get stuck bouncing inside one.
+  // The top and sides are walls. The ball is moved back inside and its
+  // speed is pointed away from the wall, so it can't get stuck in one.
   if (ball.y < 0) {
     ball.y = 0;
-    ball.speedY = Math.abs(ball.speedY); // go down
+    ball.speedY = Math.abs(ball.speedY);
   }
   if (ball.x < 0) {
     ball.x = 0;
-    ball.speedX = Math.abs(ball.speedX); // go right
+    ball.speedX = Math.abs(ball.speedX);
   }
   if (ball.x > canvas.width - ball.width) {
     ball.x = canvas.width - ball.width;
-    ball.speedX = -Math.abs(ball.speedX); // go left
+    ball.speedX = -Math.abs(ball.speedX);
   }
 
-  // Ball comes down onto a paddle: send it back up
+  // Paddles only catch the ball on its way down
   if (ball.speedY > 0) {
-    if (ballHitsPaddle(leftPaddle)) {
-      bounceOffPaddle(leftPaddle);
-    } else if (ballHitsPaddle(rightPaddle)) {
-      bounceOffPaddle(rightPaddle);
+    for (const paddle of paddles) {
+      if (ballHitsPaddle(paddle)) {
+        bounceOffPaddle(paddle);
+        break;
+      }
     }
   }
 
   updateSparks();
 
-  // The ball fell past the bottom. Whoever's half it fell on missed it,
-  // so the other player gets the point.
+  // The ball fell off the bottom: the player whose half it landed in
+  // missed it, so the other player scores
   if (ball.y > canvas.height) {
-    let ballCenter = ball.x + ball.width / 2;
+    const ballCenter = ball.x + ball.width / 2;
     if (ballCenter < canvas.width / 2) {
-      pointScored(rightPaddle, leftPaddle, "right"); // Player 1 missed
+      pointScored(rightPaddle, leftPaddle);
     } else {
-      pointScored(leftPaddle, rightPaddle, "left"); // Player 2 missed
+      pointScored(leftPaddle, rightPaddle);
     }
   }
 }
 
-// Draws the whole screen for the current frame
-function draw() {
-  // Fill the screen with black to erase the last frame
-  // <img src = "Style/warriorsClash_Background.jpg"></img>
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+// =============================================================
+// Drawing
+// =============================================================
 
-  // Gray line down the middle (gray so the ball is still easy to see on it)
-  ctx.fillStyle = "gray";
-  ctx.fillRect(canvas.width / 2 - 2, 0, 4, canvas.height);
+// Draws a filled rectangle; used when an object's image hasn't loaded
+function drawObject(obj) {
+  ctx.fillStyle = obj.color;
+  ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+}
 
-  // Draw the paddles, the ball and the sparks on top
-  drawPaddle(leftPaddle);
-  drawPaddle(rightPaddle);
-  drawBall();
-  drawSparks();
+// Draws a paddle's shield image on its side, cropped and stretched to fill
+// the paddle's box. A buffed shield glows red.
+function drawPaddle(paddle) {
+  if (!isLoaded(paddle.image)) {
+    drawObject(paddle);
+    return;
+  }
 
-  // Draw the scores. textAlign "center" centers the text on the x position.
-  ctx.fillStyle = "white";
-  ctx.font = "50px Arial";
+  ctx.save();
+  if (paddle.buffed) {
+    ctx.shadowColor = "red";
+    ctx.shadowBlur = 30;
+  }
+
+  // Rotate around the paddle's center. After a quarter turn the image's
+  // width runs vertically, so it is drawn paddle.height wide and paddle.width tall.
+  ctx.translate(paddle.x + paddle.width / 2, paddle.y + paddle.height / 2);
+  ctx.rotate(paddle.turn);
+  const c = paddle.crop;
+  ctx.drawImage(
+    paddle.image,
+    c.x, c.y, c.width, c.height, // source rectangle in the image
+    -paddle.height / 2, -paddle.width / 2, paddle.height, paddle.width, // destination
+  );
+  ctx.restore();
+}
+
+// Draws the arrow rotated to point in its direction of travel
+function drawBall() {
+  if (!isLoaded(ball.image)) {
+    drawObject(ball);
+    return;
+  }
+
+  const flyingAngle = Math.atan2(ball.speedY, ball.speedX);
+
+  ctx.save();
+
+  // Glow around the arrow so it stands out against the background.
+  // The shadow follows the image's transparent edges, so it outlines the arrow's shape.
+  ctx.shadowColor = "white";
+  ctx.shadowBlur = 15;
+
+  ctx.translate(ball.x + ball.width / 2, ball.y + ball.height / 2);
+  ctx.rotate(flyingAngle - arrowImageAngle);
+  ctx.drawImage(ball.image, -ball.width / 2, -ball.height / 2, ball.width, ball.height);
+  ctx.restore();
+}
+
+// Draws text centered on x
+function drawText(text, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.font = size + "px Arial";
   ctx.textAlign = "center";
-  ctx.fillText(leftPaddle.score, canvas.width / 4, 70);
-  ctx.fillText(rightPaddle.score, (canvas.width * 3) / 4, 70);
+  ctx.fillText(text, x, y);
+}
 
-  // Show "WARRIOR BUFF" under the score of whoever has it
-  ctx.font = "24px Arial";
-  ctx.fillStyle = "red";
-  if (leftPaddle.buffed) {
-    ctx.fillText("WARRIOR BUFF", canvas.width / 4, 105);
-  }
-  if (rightPaddle.buffed) {
-    ctx.fillText("WARRIOR BUFF", (canvas.width * 3) / 4, 105);
-  }
-  ctx.fillStyle = "white";
-  ctx.font = "50px Arial";
-
-  // Show "MATCH POINT" when either player is one point from winning
-  if (
-    !gameOver &&
-    (isMatchPoint(leftPaddle, rightPaddle) ||
-      isMatchPoint(rightPaddle, leftPaddle))
-  ) {
-    ctx.font = "30px Arial";
-    ctx.fillText("MATCH POINT", canvas.width / 2, 120);
-    ctx.font = "50px Arial";
+// Draws the scores, buff labels and any on-screen message
+function drawHud() {
+  for (const paddle of paddles) {
+    const centerX = (paddle.sideStart + paddle.sideEnd) / 2;
+    drawText(paddle.score, centerX, 70, 50, "white");
+    if (paddle.buffed) {
+      drawText("WARRIOR BUFF", centerX, 105, 24, "red");
+    }
   }
 
-  // Show the winner, or the start message when the game is paused
+  const middleX = canvas.width / 2;
+  const middleY = canvas.height / 2;
+
+  if (!gameOver && (isMatchPoint(leftPaddle, rightPaddle) || isMatchPoint(rightPaddle, leftPaddle))) {
+    drawText("MATCH POINT", middleX, 120, 30, "white");
+  }
+
   if (gameOver) {
-    ctx.fillText(winnerText, canvas.width / 2, canvas.height / 2 - 30);
-    ctx.fillText(
-      "Press Space to play again",
-      canvas.width / 2,
-      canvas.height / 2 + 40,
-    );
+    drawText(winnerText, middleX, middleY - 30, 50, "white");
+    drawText("Press Space to play again", middleX, middleY + 40, 50, "white");
   } else if (!playing) {
-    ctx.fillText("Press Space", canvas.width / 2, canvas.height / 2);
+    drawText("Press Space", middleX, middleY, 50, "white");
   }
 }
 
-// Runs at 60 fps
+// Draws the whole frame
+function draw() {
+  // The background image is stretched to fill the canvas, covering the
+  // previous frame. Black is used until the image has loaded.
+  if (isLoaded(images.background)) {
+    ctx.drawImage(images.background, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Center line, gray so the arrow stays visible when crossing it
+  ctx.fillStyle = "gray";
+  ctx.fillRect(canvas.width / 2 - 2, 0, 4, canvas.height);
+
+  for (const paddle of paddles) {
+    drawPaddle(paddle);
+  }
+  drawBall();
+  drawSparks(); // last, so sparks appear on top
+  drawHud();
+}
+
+// =============================================================
+// Input
+// =============================================================
+
+// Keys are stored in lowercase so Caps Lock and Shift don't affect controls
+document.addEventListener("keydown", function (event) {
+  const key = event.key.toLowerCase();
+  heldKeys.add(key);
+
+  // event.repeat is true for the automatic repeats while a key is held,
+  // so holding Space toggles only once
+  if (key === " " && !event.repeat) {
+    togglePlaying();
+  }
+
+  // Stop the arrow keys and Space from scrolling the page
+  if (key === " " || key === "arrowleft" || key === "arrowright") {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener("keyup", function (event) {
+  heldKeys.delete(event.key.toLowerCase());
+});
+
+// Keyup events are missed while the window is out of focus, so forget all
+// held keys to stop paddles from moving on their own afterwards
+window.addEventListener("blur", function () {
+  heldKeys.clear();
+});
+
+// =============================================================
+// Start
+// =============================================================
+
 function gameLoop() {
   if (playing) {
     update();
@@ -546,46 +585,5 @@ function gameLoop() {
   draw();
 }
 
-// Serve the first ball
 resetBall("right");
-
-setInterval(gameLoop, 1000 / 60);
-
-// When a key is pressed, remember that it's held down.
-// Space starts or pauses the game, and starts a new one after someone wins.
-// toLowerCase() makes "A" and "a" count the same, so Caps Lock doesn't break the controls.
-document.addEventListener("keydown", function (event) {
-  let key = event.key.toLowerCase();
-  if (key == "a") aPressed = true;
-  if (key == "d") dPressed = true;
-  if (event.key == "ArrowLeft") leftPressed = true;
-  if (event.key == "ArrowRight") rightPressed = true;
-  if (event.key == " ") {
-    if (gameOver) {
-      newGame();
-    }
-    playing = !playing;
-
-    // Music plays while the game is running and pauses with it.
-    // pause() keeps its place, so unpausing carries on where it left off.
-    if (playing) {
-      battleMusic.play();
-    } else {
-      battleMusic.pause();
-    }
-  }
-
-  // Stop the arrow keys and space from scrolling the page
-  if (event.key == "ArrowLeft" || event.key == "ArrowRight" || event.key == " ") {
-    event.preventDefault();
-  }
-});
-
-// When a key is let go, mark it as not held anymore
-document.addEventListener("keyup", function (event) {
-  let key = event.key.toLowerCase();
-  if (key == "a") aPressed = false;
-  if (key == "d") dPressed = false;
-  if (event.key == "ArrowLeft") leftPressed = false;
-  if (event.key == "ArrowRight") rightPressed = false;
-});
+setInterval(gameLoop, 1000 / 60); // 60 frames per second
