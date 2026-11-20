@@ -83,8 +83,8 @@ function playSound(sound) {
 const ball = {
   x: 0, // position and speed are set by resetBall
   y: 0,
-  width: 30,
-  height: 30,
+  width: 50,
+  height: 50,
   speedX: 0,
   speedY: 0,
   color: "yellow", // fallback if the image hasn't loaded
